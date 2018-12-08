@@ -59,6 +59,7 @@ plot(exp(test_ts_arima$log_catb),
      legend("topleft",c("actual","predicted"),fill=c("red","blue")))
 lines(exp(model1_forecast$mean[1:4]),type="b",col="blue")
 
+#temporary code to iterate through possibilities of arima models to find the one with minimum AIC
 #catbfinal_aic <- 1000000
 #catbfinal_order <- c(0,0,0)
 #for (p in 0:5) for (d in 0:2) for (q in 0:5) {
