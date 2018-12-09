@@ -16,80 +16,86 @@ dereg$date <- seq(as.Date("1990/05/01"),by = "month",length.out = nrow(dereg))
 
 #split the dateset to take only the relevant details and visually inspect the time series
 dereg_ts <- dereg[,c(4,5)]
-ggplot(dereg_ts,aes(x = date_format,y = CatB_dereg)) + geom_line() + scale_x_date("month")
-       + ylab("Cat B vehicle Deregistration")+ xlab()
 
-#---------------------------------------------------------------------------------------------------
-#this is the log series
-#create a log series of the Cat B deregistrations to reduce the error 
-dereg_ts$log_catb <- log(dereg_ts$CatB_dereg)
-dereg_ts$log_catb <- tsclean(dereg_ts$log_catb)
-ggplot(dereg_ts,aes(x = date_format,y = log_catb)) + geom_line() + scale_x_date("month")
-                    + ylab("Cat B vehicle Deregistration")+ xlab()
+#plot the initial time series for visual inspection
+ggplot(dereg_ts,aes(x = date,y = Catb_clean)) + geom_line() + scale_x_date("month") + ylab("Cat B vehicle Deregistration") + xlab("") + geom_vline(xintercept = as.Date("2018-04-01"),linetype = "dashed",colour="purple", size = 1)
 
-#split train and test set (wanna test for apr - jul)
-train_ts_arima <- dereg_ts[date_format < ymd("2018-04-01"),]
-test_ts_arima <- dereg_ts[date_format >= ymd("2018-04-01"),]
+#first Augmented Dicky Fuller test, acf and pacf plot 
+par(mfrow = c(2,1))
+acf(dereg_ts$Catb_clean,lag.max = 50,main ="")
+pacf(dereg_ts$Catb_clean,lag.max = 50,main="")
+adf.test(dereg_ts$Catb_clean)
 
-#---------------------------------------------------------------------------------------------------
-#train an arima model on the train data set
-adf.test(train_ts_arima$log_catb)
-acf(train_ts_arima$log_catb,main = "ACF plot")
-pacf(train_ts_arima$log_catb,main="PACF plot")
+#splitting into train and test set for ARIMA model
+train_ts_arima <- dereg_ts[date < ymd("2018-04-01"),]
+test_ts_arima <- dereg_ts[date >= ymd("2018-04-01"),]
 
-log_catb_diff_train <- diff(train_ts_arima$log_catb,differences = 1)
-plot.ts(log_catb_diff_train)
-adf.test(log_catb_diff_train)
+#Augmented Dicky Fuller test, acf and pacf plot after first differencing
+train_ts_arima$Catb_diff_1 <- diff(train_ts_arima$Catb_clean,differences = 1)
+acf(train_ts_arima$Catb_diff_1,lag.max = 30,main ="")
+pacf(train_ts_arima$Catb_diff_1,lag.max = 30,main="")
+adf.test(train_ts_arima$Catb_diff_1)
 
-acf(log_catb_diff_train)
-pacf(log_catb_diff_train)
+#Fitting an ARIMA model
+model_arima <- auto.arima(train_ts_arima$Catb_clean,stepwise = FALSE,approximation = FALSE,max.p = 15,max.q = 15)
 
-model1 <- auto.arima(train_ts_arima$log_catb,seasonal = FALSE, approximation = FALSE)
-checkresiduals(model1)
-autoplot(forecast(model1))
+#display residuals of fitted ARIMA
+tsdisplay(residuals(model_arima))
 
-model1_forecast <- forecast(model1,h=4)
-plot(model1_forecast,main="")
-lines(ts(dereg_ts$log_catb))
+#Forecast values for out-sample (April to July 2018)
+forecast_arima <- forecast(model_arima,h=4)
 
-rmse(exp(model1_forecast$mean[1:4]),exp(test_ts_arima$log_catb))
+#Forecast values for April to July 2018 with dates 
+forecast_arima_plot <- data.frame(date = seq(as.Date("2018-04-01"),by = "month",length.out = 4),Catb_clean = forecast_arima$mean[1:4])
 
-plot(exp(test_ts_arima$log_catb),
-     type = "b",col="red",
-     legend("topleft",c("actual","predicted"),fill=c("red","blue")))
-lines(exp(model1_forecast$mean[1:4]),type="b",col="blue")
+#Fitted values on in-sample
+fitted_arima <- data.frame(date = train_ts_arima$date, Catb_clean =fitted(model_arima,start = as.Date("1990-05-01")))
 
+#plotting of results
+ggplot(test_ts_arima,aes(x = date,y = Catb_clean)) + 
+  geom_line() + 
+  scale_x_date("month") + 
+  ylab("Cat B vehicle Deregistration") + 
+  xlab("") +
+  geom_line(data = forecast_arima_plot,colour = "blue") 
+
+ggplot(dereg_ts,aes(x = date,y = Catb_clean)) + 
+  geom_line() + 
+  scale_x_date("month") + 
+  ylab("Cat B vehicle Deregistration") + 
+  xlab("") +
+  geom_line(data = fitted_arima,colour = "red") +
+  geom_line(data = forecast_arima_plot,colour = "blue",size = 1)
+
+#This is the part where I manually looped through different combinations of (p,d,q) to find the one with lowest AIC
 #catbfinal_aic <- 1000000
 #catbfinal_order <- c(0,0,0)
 #for (p in 0:5) for (d in 0:2) for (q in 0:5) {
-#  catbtemp_aic <- AIC(arima(dereg_ts$log_catb,order = c(p,d,q)))
+#  catbtemp_aic <- AIC(arima(dereg_ts$Catb_clean,order = c(p,d,q)))
 #    if (catbtemp_aic < catbfinal_aic) {
 #      catbfinal_aic <- catbtemp_aic
 #      catbfinal_order <- c(p,d,q)
-#      catbfinal_arima <- arima(dereg_ts$log_catb,order = catbfinal_order)
+#      catbfinal_arima <- arima(dereg_ts$Catb_clean,order = catbfinal_order)
 #    }
 #  checkresiduals(catbfinal_arima)
 #  autoplot(forecast(catbfinal_arima))
 #}
 
 #---------------------------------------------------------------------------------------------------
-#this will be the randomforest model
+#randomforest model
 
 #lets create our additional variables!
-
 bidding <- fread("bidding results.csv")
 gdp <- fread("gdp.csv")
 pop <- fread("population.csv")
 unemp <- fread("unemployment.csv")
 
+#creating date variables
 bidding$date <- seq(as.Date("2002/02/01"),by = "month",length.out = nrow(bidding))
 gdp$date <- seq(as.Date("1990/01/01"),by = "quarter",length.out = nrow(gdp))
 unemp$date <- seq(as.Date("1992/01/01"),by = "quarter",length.out = nrow(unemp))
 
-#date_seq <- seq(from = as.Date("1990/01/01"),to = as.Date("2018/07/01"),by = "month")
-
-#use cubic splines to extrapolate between quarterly data
-
+#use cubic splines to extrapolate between quarterly data for GDP data and Unemployment data
 func_spline <- function(x,y,ori_dataset){
   func <- splinefun(x=x,y=y,method="fmm",ties = mean)
   a <- func(seq(from = x[1],to = x[length(x)],by="month"))
@@ -103,7 +109,7 @@ unemp_monthly <- func_spline(unemp$date,unemp$`Total Unemployment Rate`,unemp)
 names(unemp_monthly)[ncol(unemp_monthly)] <- "unemp_spline"
 
 
-#now i want to create a new dataframe incorporating all these
+#Create a new dataframe incorporating all the new predictors
 dataset_oth <- Reduce(function(x,y) merge(x,y,by="date",all=TRUE),list(gdp_monthly,unemp_monthly,bidding))
 dataset_temp <- merge(dataset_oth,dereg,by="date",all.x = TRUE)
 dataset_rf <- dataset_temp[-c(1:4,344:347),c(1:3,5,6,10)]
@@ -147,7 +153,6 @@ dataset_rf$bid_round2_lag4 <- shift(dataset_rf$bid_round2,n = 4)
 dataset_rf$bid_round2_lag5 <- shift(dataset_rf$bid_round2,n = 5)
 
 #create the test and train set 
-
 train_rf <- dataset_rf[dataset_rf$date >= ymd("2002-02-01") & dataset_rf$date < ymd("2018-04-01"),]
 test_rf <- dataset_rf[dataset_rf$date >= ymd("2018-04-01"),]
 
